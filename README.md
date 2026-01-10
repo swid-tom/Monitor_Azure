@@ -1,6 +1,6 @@
 # MonitorAzure_IP - Watch-AzureServiceTags
 
-<img src="/Images/item-1.png" alt="Image Description" width="300" height="300">
+<img src="/Images/item-2.png" alt="Image Description" width="300" height="300">
 
 ---------------------------------------------------------
 
