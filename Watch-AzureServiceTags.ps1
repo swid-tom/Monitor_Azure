@@ -28,10 +28,11 @@ param(
   [switch]$VerboseOutput,
 
   # --- Archive retention ---
-  [int]$ArchiveRetention = 5,              # Keep newest N files per archive
+  [ValidateScript({ $_ -eq 0 -or $_ -ge 2 })]
+  [int]$ArchiveRetention = 5,              # Keep newest N files per archive; 0 disables pruning
 
   # --- Email options ---
-  [switch]$SendEmail = $true,
+  [switch]$SendEmail,
   [string]$SmtpServer = "mail.com",
   [int]$SmtpPort = 25,
   [string]$MailFrom = "MS-CloudReport@mail.com",
@@ -249,12 +250,13 @@ function Send-ReportEmail {
 function Prune-Archive {
     param(
         [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Filter,
         [Parameter(Mandatory)][int]$Keep
     )
     if ($Keep -lt 1) { return }
 
-    $files = Get-ChildItem -Path $Path -Filter *.json -File |
-             Sort-Object LastWriteTime -Descending
+    $files = Get-ChildItem -Path $Path -Filter $Filter -File |
+             Sort-Object Name -Descending
 
     if ($files.Count -le $Keep) {
         if ($VerboseOutput) { Write-Host "Archive at '$Path' has $($files.Count); retention $Keep. Nothing to prune." -ForegroundColor DarkCyan }
@@ -585,7 +587,7 @@ function Send-TeamsWebhook {
             $status = $_.Exception.Response.StatusCode.Value__ 2>$null
             if ($attempt -lt $maxAttempts -and ($status -eq 429 -or $status -ge 500)) {
                 Start-Sleep -Seconds $delay
-                $delay = [Math]::Min(30, [int])
+                $delay = [Math]::Min(30, $delay * 2)
                 continue
             }
             throw
@@ -627,9 +629,9 @@ try {
     if ($MonitorAzureServiceTags) {
         $latestPath = Save-LatestJson
         # Prune only Azure files in root archive
-        Prune-Archive -Path $ArchiveRoot -Keep $ArchiveRetention
+        Prune-Archive -Path $ArchiveRoot -Filter "ServiceTags_Public_*.json" -Keep $ArchiveRetention
 
-        $files = Get-ChildItem -Path $ArchiveRoot -Filter "ServiceTags_Public_*.json" -File | Sort-Object LastWriteTime
+        $files = Get-ChildItem -Path $ArchiveRoot -Filter "ServiceTags_Public_*.json" -File | Sort-Object Name
         if ($files.Count -lt 2) {
             Write-Host "Azure: only one JSON in archive. Nothing to compare yet." -ForegroundColor Yellow
         } else {
@@ -643,17 +645,11 @@ try {
 
             $diff = Compare-Maps -old $old -new $new
 
-            # Apply region filter to Azure results BEFORE exporting & counting
+            # Apply the region filter before exporting and counting.
             $azAddsFiltered    = $diff.PrefixAdds | Where-Object $regionFilterScriptBlock
             $azRemsFiltered    = $diff.PrefixRems | Where-Object $regionFilterScriptBlock
             $azTagAddsFiltered = $diff.TagAdds    | Where-Object $regionFilterScriptBlock
             $azTagRemsFiltered = $diff.TagRems    | Where-Object $regionFilterScriptBlock
-
-            # Right before Export-Csv lines - Issues with filtered export - this forces filtering:
-            $azAddsFiltered     = $azAddsFiltered    | Where-Object { Test-RegionAllowed $_.Region $AzureRegions }
-            $azRemsFiltered     = $azRemsFiltered    | Where-Object { Test-RegionAllowed $_.Region $AzureRegions }
-            $azTagAddsFiltered  = $azTagAddsFiltered | Where-Object { Test-RegionAllowed $_.Region $AzureRegions }
-            $azTagRemsFiltered  = $azTagRemsFiltered | Where-Object { Test-RegionAllowed $_.Region $AzureRegions }
 
             # Export CSVs (filtered)
             $addCsv = Join-Path $ReportsRoot "diff_added_prefixes.csv"
@@ -699,9 +695,9 @@ try {
 
     if ($MonitorM365Worldwide) {
         $m365Latest = Save-M365WorldwideJson -ArchiveRoot $ArchiveRoot -VerboseOutput:$VerboseOutput
-        Prune-Archive -Path (Join-Path $ArchiveRoot "M365") -Keep $ArchiveRetention
+        Prune-Archive -Path (Join-Path $ArchiveRoot "M365") -Filter "M365_Worldwide_*.json" -Keep $ArchiveRetention
 
-        $m365Files = Get-ChildItem -Path (Join-Path $ArchiveRoot "M365") -Filter "M365_Worldwide_*.json" -File | Sort-Object LastWriteTime
+        $m365Files = Get-ChildItem -Path (Join-Path $ArchiveRoot "M365") -Filter "M365_Worldwide_*.json" -File | Sort-Object Name
         if ($m365Files.Count -lt 2) {
             Write-Host "M365: only one JSON in archive. Nothing to compare yet." -ForegroundColor Yellow
         } else {
